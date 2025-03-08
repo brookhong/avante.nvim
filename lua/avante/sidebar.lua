@@ -145,9 +145,18 @@ end
 ---@class SidebarOpenOptions: AskOptions
 ---@field selection? avante.SelectionResult
 
+local original_config_mode = Config.mode
 ---@param opts SidebarOpenOptions
 function Sidebar:open(opts)
   opts = opts or {}
+  Config.no_split = opts.no_split
+  if Config.no_split == true then
+    Config.mode = "legacy"
+    Providers[Config.provider].disable_tools = true
+  else
+    Config.mode = original_config_mode
+    Providers[Config.provider].disable_tools = nil
+  end
   local in_visual_mode = Utils.in_visual_mode() and self:in_code_win()
   if not self:is_open() then
     self:reset()
@@ -236,13 +245,17 @@ function Sidebar:close(opts)
   opts = vim.tbl_extend("force", { goto_code_win = true }, opts or {})
 
   self:delete_autocmds()
-  self:delete_containers()
 
-  self.old_result_lines = {}
-  if opts.goto_code_win and self.code and self.code.winid and api.nvim_win_is_valid(self.code.winid) then
-    fn.win_gotoid(self.code.winid)
+  if opts.goto_code_win and self.code then
+    if self.code.winid and api.nvim_win_is_valid(self.code.winid) then
+      fn.win_gotoid(self.code.winid)
+    else
+      vim.cmd("vert sb" .. self.code.bufnr)
+    end
   end
 
+  self:delete_containers()
+  self.old_result_lines = {}
   self:recover_code_winhl()
   self:close_input_hint()
 end
@@ -2882,6 +2895,7 @@ function Sidebar:get_result_container_width()
 end
 
 function Sidebar:adjust_result_container_layout()
+  if not Utils.is_valid_container(self.code, true) then return end
   local width = self:get_result_container_width()
   local height = self:get_result_container_height()
 
@@ -2910,6 +2924,7 @@ function Sidebar:render(opts)
     }),
     win_options = vim.tbl_deep_extend("force", base_win_options, {
       wrap = Config.windows.wrap,
+      relativenumber = true,
       fillchars = Config.windows.fillchars,
     }),
     size = {
@@ -2936,7 +2951,11 @@ function Sidebar:render(opts)
 
   self:update_content_with_history()
 
-  if self.code.bufnr and api.nvim_buf_is_valid(self.code.bufnr) then
+  if opts.no_split == true then
+    vim.cmd(fn.win_getid(self.code.winid) .. "wincmd q")
+    self.code.winid = nil
+    fn.win_gotoid(self.containers.input.winid)
+  elseif self.code.bufnr and api.nvim_buf_is_valid(self.code.bufnr) then
     -- reset states when buffer is closed
     api.nvim_buf_attach(self.code.bufnr, false, {
       on_detach = function(_, _)
