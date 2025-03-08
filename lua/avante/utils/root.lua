@@ -150,6 +150,9 @@ function M.get(opts)
   end
   if cwd ~= nil and #ret > #cwd then ret = cwd end
   if opts and opts.normalize then return ret end
+  if Config.no_split == true then
+    ret = os.getenv("HOME")
+  end
   return Utils.is_win() and ret:gsub("/", "\\") or ret
 end
 

@@ -21,7 +21,7 @@ function M.switch_selector_provider(target_provider)
 end
 
 ---@param target avante.ProviderName
-function M.switch_provider(target) require("avante.providers").refresh(target) end
+function M.switch_provider(target, model) require("avante.providers").refresh(target, model) end
 
 ---@param path string
 local function to_windows_path(path)

@@ -1195,7 +1195,11 @@ function M.is_top_adjacent(win_a, win_b)
 end
 
 function M.should_hidden_border(win_a, win_b)
-  return M.is_left_adjacent(win_a, win_b) or M.is_top_adjacent(win_a, win_b)
+  if win_a and api.nvim_win_is_valid(win_a) and win_b and api.nvim_win_is_valid(win_b) then
+    return M.is_left_adjacent(win_a, win_b) or M.is_top_adjacent(win_a, win_b)
+  else
+    return false
+  end
 end
 
 ---@param fields AvanteLLMToolParamField[]
