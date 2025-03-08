@@ -948,4 +948,16 @@ function M.get_provider_config(provider_name)
   return config
 end
 
+---change model for a provider
+---@param provider_name ProviderName
+---@param model_name string
+function M.change_provider_model(provider_name, model_name)
+  if not M.has_provider(provider_name) then error("No provider found: " .. provider_name, 2) end
+  if M._options[provider_name] ~= nil then
+    M._options[provider_name].model = model_name
+  elseif M.vendors and M.vendors[provider_name] ~= nil then
+    M.vendors[provider_name].model = model_name
+  end
+end
+
 return M
