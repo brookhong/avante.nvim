@@ -372,7 +372,11 @@ function M.generate_prompts(opts)
     local custom_system_prompt = Config.system_prompt
     if type(custom_system_prompt) == "function" then custom_system_prompt = custom_system_prompt() end
     if custom_system_prompt ~= nil and custom_system_prompt ~= "" and custom_system_prompt ~= "null" then
-      system_prompt = system_prompt .. "\n\n" .. custom_system_prompt
+      if Config.no_split == true then
+        system_prompt = custom_system_prompt
+      else
+        system_prompt = system_prompt .. "\n\n" .. custom_system_prompt
+      end
     end
   end
 

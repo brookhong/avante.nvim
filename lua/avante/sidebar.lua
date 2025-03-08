@@ -145,9 +145,18 @@ end
 ---@class SidebarOpenOptions: AskOptions
 ---@field selection? avante.SelectionResult
 
+local original_config_mode = Config.mode
 ---@param opts SidebarOpenOptions
 function Sidebar:open(opts)
   opts = opts or {}
+  Config.no_split = opts.no_split
+  if Config.no_split == true then
+    Config.mode = "legacy"
+    Providers[Config.provider].disable_tools = true
+  else
+    Config.mode = original_config_mode
+    Providers[Config.provider].disable_tools = nil
+  end
   local in_visual_mode = Utils.in_visual_mode() and self:in_code_win()
   if not self:is_open() then
     self:reset()
@@ -235,6 +244,15 @@ end
 function Sidebar:close(opts)
   opts = vim.tbl_extend("force", { goto_code_win = true }, opts or {})
   self:delete_autocmds()
+
+  if opts.goto_code_win and self.code then
+    if self.code.winid and api.nvim_win_is_valid(self.code.winid) then
+      fn.win_gotoid(self.code.winid)
+    else
+      vim.cmd("vert sb" .. self.code.bufnr)
+    end
+  end
+
   for _, comp in pairs(self) do
     if comp and type(comp) == "table" and comp.unmount then comp:unmount() end
   end
@@ -981,7 +999,14 @@ end
 
 function Sidebar:render_result()
   if not Utils.is_valid_container(self.result_container) then return end
-  local header_text = Utils.icon("󰭻 ") .. "Avante"
+  local header_text = Utils.icon("󰭻 ")
+    .. "Avante - "
+    .. Config.provider
+  local remaining_width = api.nvim_win_get_width(self.result_container.winid) - #header_text - 6
+  local model = Config.get_provider_config(Config.provider).model
+  if remaining_width > #model then
+    header_text = header_text .. "/" .. model
+  end
   self:render_header(
     self.result_container.winid,
     self.result_container.bufnr,
@@ -1476,6 +1501,16 @@ function Sidebar:resize()
   self:render_input()
   self:render_selected_code()
   vim.defer_fn(function() vim.cmd("AvanteRefresh") end, 200)
+end
+
+function Sidebar:toggleCodeWindow()
+  local win_width = api.nvim_win_get_width(self.code.winid)
+  if win_width == 0 then
+    api.nvim_win_set_width(self.code.winid, self.code.win_width)
+  else
+    self.code.win_width = win_width
+    api.nvim_win_set_width(self.code.winid, 0)
+  end
 end
 
 --- Initialize the sidebar instance.
@@ -3101,6 +3136,7 @@ function Sidebar:get_result_container_width()
 end
 
 function Sidebar:adjust_result_container_layout()
+  if not Utils.is_valid_container(self.code, true) then return end
   local width = self:get_result_container_width()
   local height = self:get_result_container_height()
 
@@ -3129,6 +3165,7 @@ function Sidebar:render(opts)
     }),
     win_options = vim.tbl_deep_extend("force", base_win_options, {
       wrap = Config.windows.wrap,
+      relativenumber = true,
       fillchars = Config.windows.fillchars,
     }),
     size = {
@@ -3146,6 +3183,7 @@ function Sidebar:render(opts)
   end)
 
   self.result_container:map("n", Config.mappings.sidebar.close, function() self:shutdown() end)
+  self.result_container:map("n", "x", function() self:toggleCodeWindow() end)
 
   self:create_input_container()
 
@@ -3153,7 +3191,11 @@ function Sidebar:render(opts)
 
   self:update_content_with_history()
 
-  if self.code.bufnr and api.nvim_buf_is_valid(self.code.bufnr) then
+  if opts.no_split == true then
+    vim.cmd(fn.win_getid(self.code.winid) .. "wincmd q")
+    self.code.winid = nil
+    fn.win_gotoid(self.input_container.winid)
+  elseif self.code.bufnr and api.nvim_buf_is_valid(self.code.bufnr) then
     -- reset states when buffer is closed
     api.nvim_buf_attach(self.code.bufnr, false, {
       on_detach = function(_, _)
@@ -3170,6 +3212,7 @@ function Sidebar:render(opts)
   self:create_selected_code_container()
 
   self:create_todos_container()
+  self:refresh_winids()
 
   self:on_mount(opts)
 
