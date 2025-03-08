@@ -255,6 +255,14 @@ M._defaults = {
     temperature = 0,
     max_tokens = 4096,
   },
+  ---@type AvanteSupportedProvider
+  ollama = {
+    endpoint = "http://127.0.0.1:11434/api",
+    model = "qwen2.5-coder:7b",
+    timeout = 30000, -- Timeout in milliseconds
+    temperature = 0,
+    max_tokens = 4096,
+  },
   ---To add support for custom provider, follow the format below
   ---See https://github.com/yetone/avante.nvim/wiki#custom-providers for more details
   ---@type {[string]: AvanteProvider}
