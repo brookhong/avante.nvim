@@ -107,8 +107,10 @@ cmd(
 )
 cmd("Refresh", function() require("avante.api").refresh() end, { desc = "avante: refresh windows" })
 cmd("Focus", function() require("avante.api").focus() end, { desc = "avante: switch focus windows" })
-cmd("SwitchProvider", function(opts) require("avante.api").switch_provider(vim.trim(opts.args or "")) end, {
-  nargs = 1,
+cmd("SwitchProvider", function(opts)
+  require("avante.api").switch_provider(opts.fargs[1], opts.fargs[2])
+end, {
+  nargs = "+",
   desc = "avante: switch provider",
   complete = function(_, line, _)
     local prefix = line:match("AvanteSwitchProvider%s*(.*)$") or ""

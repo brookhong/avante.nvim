@@ -227,13 +227,18 @@ function M.setup()
 end
 
 ---@param provider_name avante.ProviderName
-function M.refresh(provider_name)
+function M.refresh(provider_name, model_name)
+  local msg = "Switch to provider: " .. provider_name
+  if model_name ~= nil then
+    Config.change_provider_model(provider_name, model_name)
+    msg = msg .. "/" .. model_name
+  end
   require("avante.config").override({ provider = provider_name })
 
   ---@type AvanteProviderFunctor | AvanteBedrockProviderFunctor
   local p = M[Config.provider]
   E.setup({ provider = p, refresh = true })
-  Utils.info("Switch to provider: " .. provider_name, { once = true, title = "Avante" })
+  Utils.info(msg, { once = true, title = "Avante" })
 end
 
 ---@param opts AvanteProvider | AvanteSupportedProvider | AvanteProviderFunctor | AvanteBedrockProviderFunctor
