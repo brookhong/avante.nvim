@@ -130,6 +130,8 @@ M.zen_mode = M.full_view_ask
 
 ---@param opts? AskOptions
 function M.ask(opts)
+  -- to avoid duplicate UUID generated from math.random in avante.utils for different messages
+  math.randomseed(os.time())
   opts = opts or {}
   Config.ask_opts = opts
   if type(opts) == "string" then
