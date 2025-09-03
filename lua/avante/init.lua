@@ -101,6 +101,7 @@ function H.keymaps()
     { noremap = true }
   )
   vim.keymap.set("v", "<Plug>(AvanteEdit)", function() require("avante.api").edit() end, { noremap = true })
+  vim.keymap.set("v", "<Plug>(AvanteExplain)", function() require("avante.api").explain() end, { noremap = true })
   vim.keymap.set("n", "<Plug>(AvanteRefresh)", function() require("avante.api").refresh() end, { noremap = true })
   vim.keymap.set("n", "<Plug>(AvanteFocus)", function() require("avante.api").focus() end, { noremap = true })
   vim.keymap.set("n", "<Plug>(AvanteBuild)", function() require("avante.api").build() end, { noremap = true })
@@ -142,6 +143,12 @@ function H.keymaps()
       Config.mappings.edit,
       function() require("avante.api").edit() end,
       { desc = "avante: edit" }
+    )
+    Utils.safe_keymap_set(
+      "v",
+      Config.mappings.explain,
+      function() require("avante.api").explain() end,
+      { desc = "avante: explain code" }
     )
     Utils.safe_keymap_set(
       "n",
