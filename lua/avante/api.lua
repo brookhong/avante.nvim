@@ -1,6 +1,8 @@
 local Config = require("avante.config")
 local Utils = require("avante.utils")
 local PromptInput = require("avante.ui.prompt_input")
+local CursorSpinner = require("avante.ui.cursor_spinner")
+local ACPClient = require("avante.libs.acp_client")
 
 ---@class avante.ApiToggle
 ---@operator call(): boolean
@@ -324,6 +326,229 @@ function M.remove_selected_file(filepath)
 end
 
 function M.stop() require("avante.llm").cancel_inflight_request() end
+
+local spinner = CursorSpinner:new({
+  highlight_group = "IncSearch",
+  spinner_chars = { "⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏" },
+  virt_text_pos = "overlay",
+})
+local acp_session_id = nil
+local acp_client = nil
+--- Explains the selected code directly using LLM and displays the result in a floating window
+---@param opts? {system_prompt: string, win_opts?: table}
+function M.explain(opts)
+  -- Return early if spinner is already active
+  if spinner.spinner_active then return end
+
+  local mode = vim.fn.mode()
+  if mode == "v" or mode == "V" or mode == "\22" then -- visual, visual-line, or visual-block mode
+    vim.cmd('normal! "ay')
+  else
+    return
+  end
+
+  opts = opts or {}
+
+  -- Variables for delayed window creation
+  local result_bufnr
+  local response_content = ""
+
+  local cursor_win = vim.api.nvim_get_current_win()
+
+  spinner:start()
+
+  local system_prompt = opts.system_prompt
+  local user_prompt = vim.fn.getreg("a")
+
+  local Llm = require("avante.llm")
+
+  -- Function to create the window and buffer
+  local function create_window_and_buffer()
+    if result_bufnr then return end
+
+    -- Switch back to the buffer where LLM started if needed
+    local current_bufnr = vim.api.nvim_get_current_buf()
+    if current_bufnr ~= spinner.bufnr and vim.api.nvim_buf_is_valid(spinner.bufnr) then
+      -- Find a window containing the buffer
+      local win_with_buf = nil
+      for _, win in ipairs(vim.api.nvim_list_wins()) do
+        if vim.api.nvim_win_get_buf(win) == spinner.bufnr then
+          win_with_buf = win
+          break
+        end
+      end
+
+      if win_with_buf then vim.api.nvim_set_current_win(win_with_buf) end
+    end
+
+    -- Use the cursor position directly (which is where the spinner is displayed)
+    local screen_row, screen_col
+
+    -- Get the screen position directly from the cursor position we stored earlier
+    if vim.api.nvim_win_is_valid(cursor_win) then
+      -- Convert cursor position to screen coordinates
+      local pos = vim.fn.screenpos(cursor_win, spinner.row + 1, spinner.col + 1)
+      screen_row = pos.row - 1 -- Convert to 0-indexed for nvim_open_win
+      screen_col = pos.col - 1 -- Convert to 0-indexed for nvim_open_win
+    else
+      -- Fallback to center of screen
+      screen_row = math.floor((vim.o.lines - 20) / 2)
+      screen_col = math.floor((vim.o.columns - 80) / 2)
+    end
+
+    spinner:stop()
+    -- Create a buffer for the explanation
+    result_bufnr = vim.api.nvim_create_buf(false, true)
+    vim.bo[result_bufnr].bufhidden = "wipe"
+    vim.bo[result_bufnr].filetype = "markdown"
+
+    -- Adjust position to ensure window is visible
+    local width = 80
+    local height = 20
+
+    -- Ensure the window doesn't go off-screen
+    if screen_col + width > vim.o.columns then screen_col = vim.o.columns - width - 2 end
+    if screen_row + height > vim.o.lines then screen_row = vim.o.lines - height - 2 end
+
+    local win_opts = vim.tbl_deep_extend("force", {
+      relative = "editor",
+      width = width,
+      height = height,
+      col = screen_col,
+      row = screen_row,
+      style = "minimal",
+      border = Config.windows.edit.border,
+      title = { { "Explanation from " .. Config.provider, "FloatTitle" } },
+      title_pos = "center",
+      footer = { { "Press q or <Esc> to close this window", "FloatFooter" } },
+      footer_pos = "right",
+    }, opts.win_opts or {})
+
+    -- Create the window
+    local winid = vim.api.nvim_open_win(result_bufnr, true, win_opts)
+
+    -- Set window options
+    vim.wo[winid].wrap = true
+    vim.wo[winid].conceallevel = 2
+    vim.wo[winid].concealcursor = "n"
+    vim.wo[winid].winfixbuf = true
+
+    -- Add keymaps to close the window
+    local function close_window()
+      if vim.api.nvim_win_is_valid(winid) then vim.api.nvim_win_close(winid, true) end
+      if result_bufnr and vim.api.nvim_buf_is_valid(result_bufnr) then
+        vim.api.nvim_buf_delete(result_bufnr, { force = true })
+      end
+      result_bufnr = nil
+      response_content = ""
+    end
+
+    vim.api.nvim_buf_set_keymap(result_bufnr, "n", "q", "", {
+      callback = close_window,
+      noremap = true,
+      silent = true,
+    })
+
+    vim.api.nvim_buf_set_keymap(result_bufnr, "n", "<Esc>", "", {
+      callback = close_window,
+      noremap = true,
+      silent = true,
+    })
+
+    vim.api.nvim_buf_set_keymap(result_bufnr, "n", "<CR>", "", {
+      callback = function()
+        vim.cmd("normal! gg0" .. mode .. 'G$"ay')
+        close_window()
+        vim.cmd('normal! gv"ap')
+      end,
+      noremap = true,
+      silent = true,
+    })
+  end
+
+  local on_start = function(_) end
+  local on_chunk = function(chunk)
+    if not chunk then return end
+    response_content = response_content .. chunk
+    create_window_and_buffer()
+    if not result_bufnr or not vim.api.nvim_buf_is_valid(result_bufnr) then return end
+    vim.bo[result_bufnr].modifiable = true
+    local lines = vim.split(response_content, "\n")
+    vim.api.nvim_buf_set_lines(result_bufnr, 0, -1, false, lines)
+    vim.bo[result_bufnr].modifiable = false
+  end
+  local on_stop = function(stop_opts)
+    spinner:stop()
+    create_window_and_buffer()
+    if not result_bufnr or not vim.api.nvim_buf_is_valid(result_bufnr) then return end
+    vim.bo[result_bufnr].modifiable = true
+    if stop_opts.error ~= nil then
+      local error_message = "Error explaining code: " .. vim.inspect(stop_opts.error)
+      vim.api.nvim_buf_set_lines(result_bufnr, 0, -1, false, vim.split(error_message, "\n"))
+    elseif stop_opts.reason == "complete" then
+      response_content = Utils.trim(response_content)
+      vim.api.nvim_buf_set_lines(result_bufnr, 0, -1, false, vim.split(response_content, "\n"))
+    elseif stop_opts.reason == "cancelled" then
+      vim.api.nvim_buf_set_lines(result_bufnr, 0, -1, false, { "Code explanation was cancelled." })
+    end
+    vim.bo[result_bufnr].modifiable = false
+  end
+
+  local is_acp = Config.acp_providers[Config.provider] ~= nil
+  if is_acp then
+    local acp_prompts = {
+      {
+        text = user_prompt,
+        type = "text",
+      },
+      {
+        text = "<system_context>" .. system_prompt .. "</system_context>",
+        type = "text",
+      },
+    }
+    if acp_session_id and acp_client then
+      acp_client:send_prompt(acp_session_id, acp_prompts, function(result, err) end)
+    else
+      local acp_provider = Config.acp_providers[Config.provider]
+      local acp_config = vim.tbl_deep_extend("force", acp_provider, {
+        handlers = {
+          on_session_update = function(update)
+            if update.sessionUpdate == "agent_message_chunk" then
+              if update.content.type == "text" then on_chunk(update.content.text) end
+            end
+          end,
+        },
+      })
+      acp_client = ACPClient:new(acp_config)
+      acp_client:connect(function(conn_err)
+        require("avante").register_acp_client(Config.provider .. "explain", acp_client)
+        acp_client:create_session(Utils.root.get(), {}, function(session_id_, err)
+          acp_session_id = session_id_
+          if acp_session_id then acp_client:send_prompt(acp_session_id, acp_prompts, function(result, _) end) end
+        end)
+      end)
+    end
+  else
+    local provider = require("avante.providers")[Config.provider]
+    Llm.curl({
+      provider = provider,
+      prompt_opts = {
+        system_prompt = system_prompt,
+        messages = {
+          {
+            role = "user",
+            content = user_prompt,
+          },
+        },
+      },
+      handler_opts = {
+        on_start = on_start,
+        on_chunk = on_chunk,
+        on_stop = on_stop,
+      },
+    })
+  end
+end
 
 return setmetatable(M, {
   __index = function(t, k)
