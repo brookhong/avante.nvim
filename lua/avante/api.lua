@@ -1,6 +1,7 @@
 local Config = require("avante.config")
 local Utils = require("avante.utils")
 local PromptInput = require("avante.ui.prompt_input")
+local CursorSpinner = require("avante.ui.cursor_spinner")
 
 ---@class avante.ApiToggle
 ---@operator call(): boolean
@@ -320,6 +321,225 @@ function M.remove_selected_file(filepath)
 end
 
 function M.stop() require("avante.llm").cancel_inflight_request() end
+
+local spinner = CursorSpinner:new({
+  highlight_group = "IncSearch",
+  spinner_chars = { "⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏" },
+  virt_text_pos = "overlay",
+})
+--- Explains the selected code directly using LLM and displays the result in a floating window
+---@param opts? {system_prompt: string?, user_template: string?, selection: string?, filetype: string?, win_opts?: table} Optional parameters with selection and filetype
+function M.explain(opts)
+  opts = opts or {}
+
+  -- Return early if spinner is already active
+  if spinner.spinner_active then return end
+
+  local api = vim.api
+
+  -- Get the selected code if not provided
+  local content_to_explain = opts.selection
+  if not content_to_explain then
+    local selection = Utils.get_visual_selection_and_range()
+    if selection then
+      if
+        selection.range.start.lnum == selection.range.finish.lnum
+        and selection.range.start.col < selection.range.finish.col
+      then
+        content_to_explain = selection.content:sub(selection.range.start.col, selection.range.finish.col)
+      else
+        content_to_explain = selection.content
+      end
+    else
+      content_to_explain = ""
+    end
+    vim.api.nvim_input("<Esc>")
+  end
+
+  if content_to_explain == "" then
+    Utils.warn("No code selected to explain.")
+    return
+  end
+
+  -- Variables for delayed window creation
+  local result_bufnr
+  local response_content = ""
+
+  local cursor_win = vim.api.nvim_get_current_win()
+
+  spinner:start()
+
+  -- Prepare the system prompt
+  local system_prompt = opts.system_prompt and opts.system_prompt
+    or [[
+You are an expert coding assistant. Your task is to explain the provided code.
+Be concise but thorough. Focus on:
+1. What the code does
+2. Key functions or variables
+3. Any patterns or techniques being used
+4. Potential issues or optimizations
+
+Keep your explanation clear and to the point.
+]]
+
+  -- Prepare the user prompt
+  -- Add filetype context if available
+  local filetype = opts.filetype and opts.filetype or vim.bo.filetype
+
+  local user_template = opts.user_template and opts.user_template
+    or "The code is written in <FILE_TYPE>.\nExplain this code:\n\n<SELECTION>"
+  local user_prompt = user_template:gsub("<FILE_TYPE>", filetype):gsub("<SELECTION>", content_to_explain)
+    or content_to_explain
+
+  local Llm = require("avante.llm")
+  local provider = require("avante.providers")[Config.provider]
+
+  -- Function to create the window and buffer
+  local function create_window_and_buffer()
+    if result_bufnr then return end
+
+    -- Switch back to the buffer where LLM started if needed
+    local current_bufnr = vim.api.nvim_get_current_buf()
+    if current_bufnr ~= spinner.bufnr and vim.api.nvim_buf_is_valid(spinner.bufnr) then
+      -- Find a window containing the buffer
+      local win_with_buf = nil
+      for _, win in ipairs(vim.api.nvim_list_wins()) do
+        if vim.api.nvim_win_get_buf(win) == spinner.bufnr then
+          win_with_buf = win
+          break
+        end
+      end
+
+      if win_with_buf then vim.api.nvim_set_current_win(win_with_buf) end
+    end
+
+    -- Use the cursor position directly (which is where the spinner is displayed)
+    local screen_row, screen_col
+
+    -- Get the screen position directly from the cursor position we stored earlier
+    if vim.api.nvim_win_is_valid(cursor_win) then
+      -- Convert cursor position to screen coordinates
+      local pos = vim.fn.screenpos(cursor_win, spinner.row + 1, spinner.col + 1)
+      screen_row = pos.row - 1 -- Convert to 0-indexed for nvim_open_win
+      screen_col = pos.col - 1 -- Convert to 0-indexed for nvim_open_win
+    else
+      -- Fallback to center of screen
+      screen_row = math.floor((vim.o.lines - 20) / 2)
+      screen_col = math.floor((vim.o.columns - 80) / 2)
+    end
+
+    spinner:stop()
+    -- Create a buffer for the explanation
+    result_bufnr = api.nvim_create_buf(false, true)
+    vim.bo[result_bufnr].bufhidden = "wipe"
+    vim.bo[result_bufnr].filetype = "markdown"
+
+    -- Adjust position to ensure window is visible
+    local width = 80
+    local height = 20
+
+    -- Ensure the window doesn't go off-screen
+    if screen_col + width > vim.o.columns then screen_col = vim.o.columns - width - 2 end
+    if screen_row + height > vim.o.lines then screen_row = vim.o.lines - height - 2 end
+
+    local win_opts = vim.tbl_deep_extend("force", {
+      relative = "editor",
+      width = width,
+      height = height,
+      col = screen_col,
+      row = screen_row,
+      style = "minimal",
+      border = Config.windows.edit.border,
+      title = { { "Explanation from " .. Config.provider, "FloatTitle" } },
+      title_pos = "center",
+      footer = { { "Press q or <Esc> to close this window", "FloatFooter" } },
+      footer_pos = "right",
+    }, opts.win_opts or {})
+
+    -- Create the window
+    local winid = api.nvim_open_win(result_bufnr, true, win_opts)
+
+    -- Set window options
+    vim.wo[winid].wrap = true
+    vim.wo[winid].conceallevel = 2
+    vim.wo[winid].concealcursor = "n"
+    vim.wo[winid].winfixbuf = true
+
+    -- Add keymaps to close the window
+    local function close_window()
+      if api.nvim_win_is_valid(winid) then api.nvim_win_close(winid, true) end
+    end
+
+    api.nvim_buf_set_keymap(result_bufnr, "n", "q", "", {
+      callback = close_window,
+      noremap = true,
+      silent = true,
+    })
+
+    api.nvim_buf_set_keymap(result_bufnr, "n", "<Esc>", "", {
+      callback = close_window,
+      noremap = true,
+      silent = true,
+    })
+  end
+
+  Llm.curl({
+    provider = provider,
+    prompt_opts = {
+      system_prompt = system_prompt,
+      messages = {
+        {
+          role = "user",
+          content = user_prompt,
+        },
+      },
+    },
+    handler_opts = {
+      on_start = function(_) end,
+      on_chunk = function(chunk)
+        if not chunk then return end
+
+        -- Append the chunk to our accumulated response
+        response_content = response_content .. chunk
+
+        -- Create window on first chunk if not already created
+        create_window_and_buffer()
+
+        if not result_bufnr or not api.nvim_buf_is_valid(result_bufnr) then return end
+
+        -- Update the buffer with the current content
+        vim.bo[result_bufnr].modifiable = true
+        local lines = vim.split(response_content, "\n")
+        api.nvim_buf_set_lines(result_bufnr, 0, -1, false, lines)
+        vim.bo[result_bufnr].modifiable = false
+      end,
+      on_stop = function(stop_opts)
+        -- Stop the spinner if it's still active
+        spinner:stop()
+
+        -- Create window if not already created (in case we got no chunks but have an error)
+        create_window_and_buffer()
+
+        if not result_bufnr or not api.nvim_buf_is_valid(result_bufnr) then return end
+
+        vim.bo[result_bufnr].modifiable = true
+
+        if stop_opts.error ~= nil then
+          local error_message = "Error explaining code: " .. vim.inspect(stop_opts.error)
+          api.nvim_buf_set_lines(result_bufnr, 0, -1, false, vim.split(error_message, "\n"))
+        elseif stop_opts.reason == "complete" then
+          -- Clean up the response if needed
+          response_content = Utils.trim(response_content)
+          api.nvim_buf_set_lines(result_bufnr, 0, -1, false, vim.split(response_content, "\n"))
+        elseif stop_opts.reason == "cancelled" then
+          api.nvim_buf_set_lines(result_bufnr, 0, -1, false, { "Code explanation was cancelled." })
+        end
+
+        vim.bo[result_bufnr].modifiable = false
+      end,
+    },
+  })
+end
 
 return setmetatable(M, {
   __index = function(t, k)

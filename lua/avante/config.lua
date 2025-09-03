@@ -636,6 +636,7 @@ M._defaults = {
     new_ask = "<leader>an",
     zen_mode = "<leader>az",
     edit = "<leader>ae",
+    explain = "<leader>ax",
     refresh = "<leader>ar",
     focus = "<leader>af",
     stop = "<leader>aS",
