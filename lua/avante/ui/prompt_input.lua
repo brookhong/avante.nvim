@@ -7,6 +7,7 @@ local Utils = require("avante.utils")
 ---@field bufnr integer | nil
 ---@field winid integer | nil
 ---@field win_opts table
+---@field input_wrap boolean
 ---@field shortcuts_hints_winid integer | nil
 ---@field augroup integer | nil
 ---@field start_insert boolean
@@ -28,6 +29,7 @@ PromptInput.__index = PromptInput
 ---@field cancel_callback? fun():nil
 ---@field close_on_submit? boolean
 ---@field win_opts? table
+---@field input_wrap? boolean
 ---@field default_value? string
 
 ---@param opts? avante.ui.PromptInputOptions
@@ -43,6 +45,7 @@ function PromptInput:new(opts)
   obj.cancel_callback = opts.cancel_callback
   obj.close_on_submit = opts.close_on_submit or false
   obj.win_opts = opts.win_opts
+  obj.input_wrap = opts.input_wrap or false
   obj.default_value = opts.default_value
   obj.spinner_chars = Config.windows.spinner.editing
   obj.spinner_index = 1
@@ -75,8 +78,7 @@ function PromptInput:open()
   local winid = api.nvim_open_win(bufnr, true, win_opts)
   self.winid = winid
 
-  api.nvim_set_option_value("wrap", false, { win = winid })
-  api.nvim_set_option_value("winblend", 5, { win = winid })
+  api.nvim_set_option_value("wrap", self.input_wrap, { win = winid })
   api.nvim_set_option_value(
     "winhighlight",
     "FloatBorder:AvantePromptInputBorder,Normal:AvantePromptInput",
