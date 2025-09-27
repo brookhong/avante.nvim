@@ -6,6 +6,7 @@ local RepoMap = require("avante.repo_map")
 local PromptInput = require("avante.ui.prompt_input")
 local SelectionResult = require("avante.selection_result")
 local Range = require("avante.range")
+local PromptLogger = require("avante.utils.promptLogger")
 
 local api = vim.api
 local fn = vim.fn
@@ -126,6 +127,10 @@ function Selection:submit_input(input)
     )
     return
   end
+
+  -- Log the user input to promptLogger
+  if Config.prompt_logger.enabled then PromptLogger.log_prompt(input) end
+
   local code_lines = api.nvim_buf_get_lines(self.code_bufnr, 0, -1, false)
   local code_content = table.concat(code_lines, "\n")
 
@@ -241,6 +246,9 @@ function Selection:create_editing_input(request, line1, line2)
     vim.g.avante_login = true
   end
 
+  -- Initialize promptLogger if enabled
+  if Config.prompt_logger.enabled then PromptLogger.init() end
+
   self.code_bufnr = api.nvim_get_current_buf()
   self.code_winid = api.nvim_get_current_win()
   self.cursor_pos = api.nvim_win_get_cursor(self.code_winid)
@@ -261,8 +269,12 @@ function Selection:create_editing_input(request, line1, line2)
   end
 
   if self.selection == nil then
-    Utils.error("No visual selection found", { once = true, title = "Avante" })
-    return
+    -- Use entire buffer content if no selection
+    local filepath = vim.fn.expand("%:p")
+    local filetype = Utils.get_filetype(filepath)
+    local content = table.concat(code_lines, "\n")
+    local range = Range:new({ lnum = 1, col = 0 }, { lnum = #code_lines, col = #code_lines[#code_lines] })
+    self.selection = SelectionResult:new(filepath, filetype, content, range)
   end
 
   local start_row
@@ -290,6 +302,9 @@ function Selection:create_editing_input(request, line1, line2)
       priority = PRIORITY,
     })
 
+  local width = Config.windows.edit.width
+  if width == 0 then width = api.nvim_win_get_width(0) end
+
   local prompt_input = PromptInput:new({
     default_value = request,
     submit_callback = function(input) self:submit_input(input) end,
@@ -297,15 +312,55 @@ function Selection:create_editing_input(request, line1, line2)
     win_opts = {
       border = Config.windows.edit.border,
       height = Config.windows.edit.height,
-      width = Config.windows.edit.width,
+      width = width,
       title = { { "Avante edit selected block", "FloatTitle" } },
     },
+    input_wrap = true,
     start_insert = Config.windows.edit.start_insert,
   })
 
   self.prompt_input = prompt_input
 
   prompt_input:open()
+
+  -- Add history navigation keymaps if prompt logger is enabled
+  if Config.prompt_logger.enabled and prompt_input.bufnr then
+    -- Add keymap for next prompt (newer)
+    if Config.prompt_logger.next_prompt.normal then
+      vim.keymap.set(
+        "n",
+        Config.prompt_logger.next_prompt.normal,
+        PromptLogger.on_log_retrieve(-1),
+        { buffer = prompt_input.bufnr, noremap = true, silent = true }
+      )
+    end
+    if Config.prompt_logger.next_prompt.insert then
+      vim.keymap.set(
+        "i",
+        Config.prompt_logger.next_prompt.insert,
+        PromptLogger.on_log_retrieve(-1),
+        { buffer = prompt_input.bufnr, noremap = true, silent = true }
+      )
+    end
+
+    -- Add keymap for previous prompt (older)
+    if Config.prompt_logger.prev_prompt.normal then
+      vim.keymap.set(
+        "n",
+        Config.prompt_logger.prev_prompt.normal,
+        PromptLogger.on_log_retrieve(1),
+        { buffer = prompt_input.bufnr, noremap = true, silent = true }
+      )
+    end
+    if Config.prompt_logger.prev_prompt.insert then
+      vim.keymap.set(
+        "i",
+        Config.prompt_logger.prev_prompt.insert,
+        PromptLogger.on_log_retrieve(1),
+        { buffer = prompt_input.bufnr, noremap = true, silent = true }
+      )
+    end
+  end
 end
 
 ---Show the hints virtual line and set up autocommands to update it or stop showing it when exiting visual mode
