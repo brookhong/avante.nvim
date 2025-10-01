@@ -7,6 +7,7 @@ local Suggestion = require("avante.suggestion")
 local Config = require("avante.config")
 local Diff = require("avante.diff")
 local RagService = require("avante.rag_service")
+local Path = require("avante.path")
 
 ---@class Avante
 local M = {
@@ -403,7 +404,16 @@ function M.open_sidebar(opts)
   local sidebar = M.get()
   if not sidebar then M._init(api.nvim_get_current_tabpage()) end
   ---@cast opts SidebarOpenOptions
-  M.current.sidebar:open(opts)
+  local buf = api.nvim_get_current_buf()
+  local histories = Path.history.list(buf)
+  if #histories > 1 then
+    require("avante.history_selector").open(buf, function(filename)
+      Path.history.save_latest_filename(buf, filename)
+      M.current.sidebar:open(opts)
+    end, true)
+  else
+    M.current.sidebar:open(opts)
+  end
 end
 
 function M.close_sidebar()

@@ -22,7 +22,8 @@ end
 
 ---@param bufnr integer
 ---@param cb fun(filename: string)
-function M.open(bufnr, cb)
+---@param just_open boolean | nil
+function M.open(bufnr, cb, just_open)
   local selector_items = {}
 
   local histories = Path.history.list(bufnr)
@@ -36,9 +37,7 @@ function M.open(bufnr, cb)
     return
   end
 
-  local current_selector -- To be able to close it from the keymap
-
-  current_selector = Selector:new({
+  local selector_opts = {
     provider = Config.selector.provider, -- This should be 'native' for the current setup
     title = "Avante History (Select, then choose action)", -- Updated title
     items = vim
@@ -76,8 +75,13 @@ function M.open(bufnr, cb)
       -- If the user cancels the open/delete prompt, re-open the history selector.
       M.open(bufnr, cb)
     end,
-  })
-  current_selector:open()
+  }
+  if just_open then
+    selector_opts.title = "Avante History (Select one to open)"
+    selector_opts.on_delete_item = nil
+  end
+
+  Selector:new(selector_opts):open()
 end
 
 return M
