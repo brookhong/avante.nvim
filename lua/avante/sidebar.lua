@@ -2159,11 +2159,28 @@ end
 function Sidebar:clear_history(args, cb)
   self.current_state = nil
   if next(self.chat_history) ~= nil then
+    local message_total = #self.chat_history.messages
     self.chat_history.messages = {}
     self.chat_history.entries = {}
     Path.history.save(self.code.bufnr, self.chat_history)
     self._history_cache_invalidated = true
     self:reload_chat_history()
+
+    -- Only clear todos if all todos are done or no message to be cleared
+    local clear_todo = true
+    if message_total > 0 then
+      if self.chat_history.todos and #self.chat_history.todos > 0 then
+        for _, todo in ipairs(self.chat_history.todos) do
+          if todo.status ~= "done" then
+            clear_todo = false
+            break
+          end
+        end
+      end
+    end
+
+    if clear_todo then self:update_todos({}) end
+
     self:update_content_with_history()
     self:update_content(
       "Chat history cleared",
@@ -3245,6 +3262,7 @@ function Sidebar:render(opts)
 
   self.containers.result:map("n", Config.mappings.sidebar.close, function() self:shutdown() end)
   self.containers.result:map("n", Config.mappings.sidebar.toggle_code_window, function() self:toggle_code_window() end)
+  self.containers.result:map("n", Config.mappings.sidebar.clear_history, function() self:clear_history() end)
 
   self:create_input_container()
 
