@@ -2131,6 +2131,22 @@ function Sidebar:clear_history(args, cb)
     Path.history.save(self.code.bufnr, self.chat_history)
     self._history_cache_invalidated = true
     self:reload_chat_history()
+
+    -- Only clear todos if all todos are done
+    local all_todos_done = true
+    if self.chat_history.todos and #self.chat_history.todos > 0 then
+      for _, todo in ipairs(self.chat_history.todos) do
+        if todo.status ~= "done" then
+          all_todos_done = false
+          break
+        end
+      end
+    end
+
+    if all_todos_done then
+      self:update_todos({})
+    end
+
     self:update_content_with_history()
     self:update_content(
       "Chat history cleared",
@@ -3205,6 +3221,7 @@ function Sidebar:render(opts)
 
   self.containers.result:map("n", Config.mappings.sidebar.close, function() self:shutdown() end)
   self.containers.result:map("n", Config.mappings.sidebar.toggle_code_window, function() self:toggle_code_window() end)
+  self.containers.result:map("n", Config.mappings.sidebar.clear_history, function() self:clear_history() end)
 
   self:create_input_container()
 
