@@ -355,6 +355,7 @@ M._defaults = {
       model = "us.anthropic.claude-3-7-sonnet-20250219-v1:0",
       model_names = {
         "anthropic.claude-3-5-sonnet-20241022-v2:0",
+        "global.anthropic.claude-sonnet-4-5-20250929-v1:0",
         "us.anthropic.claude-3-7-sonnet-20250219-v1:0",
         "us.anthropic.claude-opus-4-20250514-v1:0",
         "us.anthropic.claude-opus-4-1-20250805-v1:0",
@@ -873,7 +874,7 @@ function M.get_last_used_model(known_providers)
         os.remove(storage_path)
         return
       end
-      if data.provider_model and provider.model and provider.model ~= data.provider_model then
+      if data.provider_model and provider.model and provider.model ~= data.provider_model and not vim.tbl_contains(provider.model_names, data.provider_model) then
         return provider.model, data.last_provider
       end
     end
