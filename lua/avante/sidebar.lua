@@ -281,6 +281,15 @@ function Sidebar:close(opts)
 end
 
 function Sidebar:shutdown()
+  -- Check if there's content in the input container
+  if Utils.is_valid_container(self.containers.input) then
+    local input_value = self:get_input_value()
+    if input_value and input_value ~= "" then
+      Utils.warn("Cannot close: input container has unsaved content", { title = "Avante" })
+      return
+    end
+  end
+
   Llm.cancel_inflight_request()
   self:close()
   vim.cmd("noautocmd stopinsert")
