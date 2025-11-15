@@ -281,6 +281,15 @@ function Sidebar:close(opts)
 end
 
 function Sidebar:shutdown()
+  -- Check if there's content in the input container
+  if Utils.is_valid_container(self.containers.input) then
+    local input_value = self:get_input_value()
+    if input_value and input_value ~= "" then
+      Utils.warn("Cannot close: input container has unsaved content", { title = "Avante" })
+      return
+    end
+  end
+
   Llm.cancel_inflight_request()
   self:close()
   vim.cmd("noautocmd stopinsert")
@@ -2128,10 +2137,12 @@ function Sidebar:clear_history(args, cb)
   if next(self.chat_history) ~= nil then
     self.chat_history.messages = {}
     self.chat_history.entries = {}
+    self.chat_history.todos = {}
     Path.history.save(self.code.bufnr, self.chat_history)
     self._history_cache_invalidated = true
     self:reload_chat_history()
     self:update_content_with_history()
+    self:create_todos_container()
     self:update_content(
       "Chat history cleared",
       { focus = false, scroll = false, callback = function() self:focus_input() end }
