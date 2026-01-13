@@ -350,6 +350,8 @@ function M.generate_prompts(opts)
   local system_prompt
   if opts.prompt_opts and opts.prompt_opts.system_prompt then
     system_prompt = opts.prompt_opts.system_prompt
+  elseif mode == "override" then
+    system_prompt = ""
   else
     system_prompt = Path.prompts.render_mode(mode, template_opts)
   end
